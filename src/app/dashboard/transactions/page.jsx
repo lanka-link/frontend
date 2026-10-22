@@ -1,0 +1,187 @@
+"use client";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import useAuthGuard from "@/hooks/useAuthGuard";
+import PageHeader from "@/components/common/PageHeader";
+import Button from "@/components/ui/Button";
+import Card from "@/components/ui/Card";
+import Table from "@/components/ui/Table";
+import StatusBadge from "@/components/common/StatusBadge";
+import LoadingSpinner from "@/components/common/LoadingSpinner";
+import EmptyState from "@/components/common/EmptyState";
+import useTransactions from "@/hooks/useTransactions";
+import { transactionApi } from "@/services/api/transaction";
+import { formatCurrency, formatDate, titleCase } from "@/lib/formatters";
+import DetailDialog from "@/components/common/DetailDialog";
+
+import { t } from "@/lib/i18n";
+// Credit = money coming in, Debit = money going out
+const CREDIT_TYPES = new Set(["sale", "deposit"]);
+
+const COLS = [
+  {
+    key: "transaction_type",
+    get label() {
+      return t("Type");
+    },
+  },
+  {
+    key: "flow",
+    get label() {
+      return t("Credit/Debit");
+    },
+  },
+  {
+    key: "amount",
+    get label() {
+      return t("Amount");
+    },
+  },
+  {
+    key: "payment_method",
+    get label() {
+      return t("Payment");
+    },
+  },
+  {
+    key: "category",
+    get label() {
+      return t("Category");
+    },
+  },
+  {
+    key: "created_at",
+    get label() {
+      return t("Date");
+    },
+  },
+  { key: "actions", label: "" },
+];
+
+export default function TransactionsPage() {
+  useAuthGuard();
+  const { items, loading, error, fetchAll } = useTransactions();
+  const [search, setSearch] = useState("");
+  const [viewItem, setViewItem] = useState(null);
+  useEffect(() => {
+    fetchAll();
+  }, [fetchAll]);
+
+  async function handleDelete(id) {
+    if (!confirm("Delete this transaction?")) return;
+    try {
+      await transactionApi.remove(id);
+      await fetchAll();
+    } catch (e) {
+      alert(e.message || t("Failed"));
+    }
+  }
+
+  const filtered = useMemo(() => {
+    const kw = search.toLowerCase().trim();
+    return !kw
+      ? items
+      : items.filter((i) =>
+          [i.transaction_type, i.category, i.payment_method, i.description, i.supplier_name]
+            .join(" ")
+            .toLowerCase()
+            .includes(kw),
+        );
+  }, [items, search]);
+
+  const rows = filtered.map((item) => {
+    const isCredit = CREDIT_TYPES.has(item.transaction_type);
+    return {
+      ...item,
+      transaction_type: t(titleCase(item.transaction_type || "")),
+      flow: (
+        <span
+          className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+            isCredit
+              ? "bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-300"
+              : "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300"
+          }`}
+        >
+          {isCredit ? t("Credit") : t("Debit")}
+        </span>
+      ),
+      amount: (
+        <span
+          className={`whitespace-nowrap font-semibold ${isCredit ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}
+        >
+          {isCredit ? "+" : "-"} {formatCurrency(item.amount)}
+        </span>
+      ),
+      payment_method: t(titleCase(item.payment_method || "")),
+      category: item.category ? (
+        <span>
+          {t(item.category)}
+          {item.supplier_name && <span className="block text-xs text-slate-500">→ {item.supplier_name}</span>}
+        </span>
+      ) : (
+        <span className="text-slate-400">—</span>
+      ),
+      created_at: <span className="text-slate-500 dark:text-slate-400">{formatDate(item.created_at)}</span>,
+      actions: (
+        <div className="flex gap-2">
+          <Button variant="ghost" className="!px-3 !py-1.5 !text-xs" onClick={() => setViewItem(item)}>
+            {t("View")}
+          </Button>
+          <Link href={`/dashboard/transactions/${item.id}/edit`}>
+            <Button variant="secondary" size="sm">
+              {t("Edit")}
+            </Button>
+          </Link>
+          <Button variant="danger" size="sm" onClick={() => handleDelete(item.id)}>
+            {t("Delete")}
+          </Button>
+        </div>
+      ),
+    };
+  });
+
+  return (
+    <div className="page-container">
+      <PageHeader
+        title={t("Transactions")}
+        description={t("All financial transactions.")}
+        action={
+          <Link href="/dashboard/transactions/create">
+            <Button>{t("+ New Transaction")}</Button>
+          </Link>
+        }
+      />
+      <Card className="mb-4">
+        <input
+          type="text"
+          placeholder={t("Search by type, category, payment...")}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="input-field"
+        />
+      </Card>
+      {loading ? (
+        <LoadingSpinner label={t("Loading transactions...")} />
+      ) : error ? (
+        <Card>
+          <p className="text-sm text-red-600">{error}</p>
+        </Card>
+      ) : items.length === 0 ? (
+        <EmptyState
+          icon="💳"
+          title={t("No transactions")}
+          description={t("Add your first transaction.")}
+          action={
+            <Link href="/dashboard/transactions/create">
+              <Button>{t("New Transaction")}</Button>
+            </Link>
+          }
+        />
+      ) : (
+        <Table columns={COLS} rows={rows} />
+      )}
+
+      <DetailDialog open={!!viewItem} kind="transactions" data={viewItem} onClose={() => setViewItem(null)} />
+    </div>
+  );
+}

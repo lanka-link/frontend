@@ -1,0 +1,112 @@
+"use client";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { NAV_ITEMS, NAV_GROUPS } from "@/lib/constants";
+import { t } from "@/lib/i18n";
+import {
+  LayoutDashboard,
+  CreditCard,
+  BookOpen,
+  FileBarChart,
+  Package,
+  ShoppingCart,
+  Landmark,
+  Building2,
+  Wallet,
+  Handshake,
+  Bot,
+  User,
+} from "lucide-react";
+
+// Map the icon names stored in constants to the actual lucide components.
+const ICONS = {
+  LayoutDashboard,
+  CreditCard,
+  BookOpen,
+  FileBarChart,
+  Package,
+  ShoppingCart,
+  Landmark,
+  Building2,
+  Wallet,
+  Handshake,
+  Bot,
+  User,
+};
+
+const ORDER = ["overview", "finance", "operations", "account"];
+
+export const isActive = (pathname, href) =>
+  // the Dashboard link is a prefix of every page, so it only matches exactly
+  pathname === href || (href !== "/dashboard" && pathname.startsWith(`${href}/`));
+
+export { ICONS };
+
+/** The grouped link list — used by the desktop sidebar and the phone menu drawer. */
+export function SidebarNav({ onNavigate }) {
+  const pathname = usePathname();
+
+  return (
+    <nav className="space-y-5 p-3">
+      {ORDER.map((group) => {
+        const items = NAV_ITEMS.filter((i) => i.group === group);
+        if (!items.length) return null;
+        return (
+          <div key={group}>
+            <div className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+              {t(NAV_GROUPS[group])}
+            </div>
+            <div className="space-y-0.5">
+              {items.map((item) => {
+                const active = isActive(pathname, item.href);
+                const Icon = ICONS[item.icon];
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={onNavigate}
+                    className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
+                      active
+                        ? "bg-gradient-to-r from-brand-600 to-brand-400 text-white shadow-sm shadow-brand-500/25"
+                        : "text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                    }`}
+                  >
+                    {/* active left indicator */}
+                    {active && (
+                      <span className="absolute -left-3 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-brand-500" />
+                    )}
+                    <span
+                      className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${
+                        active
+                          ? "bg-white/20"
+                          : "bg-slate-100 group-hover:bg-white dark:bg-slate-800 dark:group-hover:bg-slate-700"
+                      }`}
+                    >
+                      {Icon ? (
+                        <Icon
+                          className={`h-4 w-4 ${active ? "text-white" : "text-slate-500 group-hover:text-brand-600 dark:text-slate-400 dark:group-hover:text-brand-400"}`}
+                        />
+                      ) : (
+                        <span className="text-base leading-none">{item.icon}</span>
+                      )}
+                    </span>
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </nav>
+  );
+}
+
+// Desktop / tablet only — on phones the bottom bar and its "Menu" drawer replace it (MobileNav)
+export default function Sidebar() {
+  return (
+    <aside className="hidden w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm md:sticky md:top-20 md:block md:w-64 dark:border-slate-800 dark:bg-slate-900">
+      <SidebarNav />
+    </aside>
+  );
+}

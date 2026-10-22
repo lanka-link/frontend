@@ -1,0 +1,332 @@
+"use client";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import FormField from "./FormField";
+import Button from "@/components/ui/Button";
+import { inventoryApi } from "@/services/api/inventory";
+import { supplierApi } from "@/services/api/supplier";
+import { INVENTORY_UNITS } from "@/lib/constants";
+
+import { t } from "@/lib/i18n";
+const ITEM_CATEGORIES = [
+  "Rice & Grains",
+  "Beverages",
+  "Dairy & Bakery",
+  "Snacks & Sweets",
+  "Canned & Packaged Food",
+  "Household & Cleaning",
+  "Personal Care",
+  "Spices & Cooking Essentials",
+  "Other",
+];
+
+export default function InventoryForm({ initialData = {}, itemId = null }) {
+  const router = useRouter();
+  const isEdit = !!itemId;
+  const [saving, setSaving] = useState(false);
+  const [serverError, setServerError] = useState(null);
+  const [errors, setErrors] = useState({});
+  const [suppliers, setSuppliers] = useState([]);
+
+  const [v, setV] = useState({
+    name: initialData.name ?? "",
+    category: initialData.category ?? "",
+    supplier_name: initialData.supplier_name ?? "",
+    quantity: initialData.quantity ?? "",
+    reorder_level: initialData.reorder_level ?? "",
+    unit: initialData.unit ?? "unit",
+    cost_price: initialData.cost_price ?? initialData.unit_price ?? "",
+    selling_price: Number(initialData.selling_price) > 0 ? initialData.selling_price : "",
+    lead_time_days: initialData.lead_time_days ?? "1", // used for the safety-stock reorder point
+  });
+
+  function set(k, val) {
+    setV((p) => ({ ...p, [k]: val }));
+    setErrors((p) => ({ ...p, [k]: undefined }));
+  }
+
+  useEffect(() => {
+    supplierApi
+      .list()
+      .then((data) => setSuppliers(Array.isArray(data) ? data : []))
+      .catch(() => setSuppliers([]));
+  }, []);
+
+  const supplierNames = suppliers.map((s) => s.name);
+  const supplierOptions = [...supplierNames];
+  if (v.supplier_name && !supplierNames.includes(v.supplier_name)) {
+    supplierOptions.unshift(v.supplier_name);
+  }
+
+  // Selected supplier's items_supplied ([{item_name, quantity, unit, unit_price}])
+  // powers a datalist suggestion on "Item Name" and auto-fills cost/unit
+  // when the typed name matches one of their items exactly.
+  const selectedSupplier = suppliers.find((s) => s.name === v.supplier_name);
+  const supplierItems = selectedSupplier?.items_supplied || [];
+
+  function setItemName(val) {
+    const match = supplierItems.find((it) => it.item_name.trim().toLowerCase() === val.trim().toLowerCase());
+    setV((p) => ({
+      ...p,
+      name: val,
+      ...(match ? { cost_price: match.unit_price ?? p.cost_price, unit: match.unit || p.unit } : {}),
+    }));
+    setErrors((p) => ({ ...p, name: undefined }));
+  }
+
+  // add a custom category to the dropdown if it is not in the list
+  const categoryOptions = [...ITEM_CATEGORIES];
+  if (v.category && !categoryOptions.includes(v.category)) {
+    categoryOptions.unshift(v.category);
+  }
+
+  // Total Cost = Unit Cost × Quantity (calculated live, not saved)
+  const unitCost = Number(v.cost_price) || 0;
+  const qty = Number(v.quantity) || 0;
+  const totalCost = unitCost * qty;
+  const sellPrice = Number(v.selling_price) || 0;
+  const sellBelowCost = sellPrice > 0 && unitCost > 0 && sellPrice < unitCost;
+  const sellAtCost = sellPrice > 0 && unitCost > 0 && sellPrice === unitCost;
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const er = {};
+    if (!v.name.trim()) er.name = t("Item name is required.");
+    if (!v.category) er.category = t("Please select a category for AI forecasting.");
+    if (v.quantity === "" || Number(v.quantity) < 0) er.quantity = t("Enter a valid quantity (0 or more).");
+    if (v.cost_price !== "" && Number(v.cost_price) < 0) er.cost_price = t("Cost price cannot be negative.");
+    if (v.selling_price !== "" && Number(v.selling_price) < 0)
+      er.selling_price = t("Selling price cannot be negative.");
+
+    if (Object.keys(er).length) {
+      setErrors(er);
+      return;
+    }
+
+    setSaving(true);
+    setServerError(null);
+
+    const payload = {
+      ...v,
+      quantity: Number(v.quantity),
+      reorder_level: v.reorder_level === "" ? 0 : Number(v.reorder_level),
+      cost_price: v.cost_price === "" ? 0 : Number(v.cost_price),
+      selling_price: v.selling_price === "" ? 0 : Number(v.selling_price),
+      lead_time_days: v.lead_time_days === "" ? 1 : Number(v.lead_time_days),
+    };
+
+    try {
+      if (isEdit) await inventoryApi.update(itemId, payload);
+      else await inventoryApi.create(payload);
+      router.push("/dashboard/inventory");
+    } catch (err) {
+      setServerError(err.message || t("Save failed."));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const cls = (k) => `input-field ${errors[k] ? "border-red-400 ring-2 ring-red-100" : ""}`;
+
+  return (
+    <form onSubmit={handleSubmit} noValidate className="card-elevated max-w-3xl mx-auto space-y-5">
+      {serverError && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {serverError}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+        <FormField
+          label={t("Supplier")}
+          hint={
+            supplierOptions.length === 0
+              ? t("No suppliers yet — add one first, or type a name.")
+              : t("Choose from your suppliers")
+          }
+        >
+          {supplierOptions.length > 0 ? (
+            <select
+              className="select-field"
+              value={v.supplier_name}
+              onChange={(e) => set("supplier_name", e.target.value)}
+            >
+              <option value="">{t("Select a supplier")}</option>
+              {supplierOptions.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              className="input-field"
+              value={v.supplier_name}
+              onChange={(e) => set("supplier_name", e.target.value)}
+              placeholder={t("e.g. ABC Traders")}
+            />
+          )}
+        </FormField>
+
+        <FormField
+          label={t("Item Name")}
+          error={errors.name}
+          required
+          hint={
+            supplierItems.length > 0
+              ? `${t("Suggested from")} ${v.supplier_name}: ${t("pick one to auto-fill cost & unit")}`
+              : undefined
+          }
+        >
+          <input
+            className={cls("name")}
+            list="supplier-item-suggestions"
+            value={v.name}
+            onChange={(e) => setItemName(e.target.value)}
+            placeholder={t("e.g. Rice 5kg")}
+          />
+          {supplierItems.length > 0 && (
+            <datalist id="supplier-item-suggestions">
+              {supplierItems.map((it, i) => (
+                <option key={i} value={it.item_name} />
+              ))}
+            </datalist>
+          )}
+        </FormField>
+
+        <FormField
+          label={t("Category")}
+          error={errors.category}
+          required
+          hint={t("Required for AI Demand Forecasting")}
+        >
+          <select
+            className="select-field"
+            value={v.category}
+            onChange={(e) => set("category", e.target.value)}
+          >
+            <option value="">{t("Select Category...")}</option>
+            {categoryOptions.map((cat) => (
+              <option key={cat} value={cat}>
+                {t(cat)}
+              </option>
+            ))}
+          </select>
+        </FormField>
+
+        <FormField label={t("Unit")}>
+          <select className="select-field" value={v.unit} onChange={(e) => set("unit", e.target.value)}>
+            {INVENTORY_UNITS.map((u) => (
+              <option key={u.value} value={u.value}>
+                {u.label}
+              </option>
+            ))}
+          </select>
+        </FormField>
+
+        <FormField label={t("Initial Quantity")} error={errors.quantity} required>
+          <input
+            className={cls("quantity")}
+            type="number"
+            min="0"
+            step="0.01"
+            value={v.quantity}
+            onChange={(e) => set("quantity", e.target.value)}
+          />
+        </FormField>
+
+        <FormField label={t("Reorder Level")} hint={t("Alert threshold (Auto-calculated by AI if empty)")}>
+          <input
+            className="input-field"
+            type="number"
+            min="0"
+            step="0.01"
+            value={v.reorder_level}
+            onChange={(e) => set("reorder_level", e.target.value)}
+            placeholder={t("Default: Auto AI")}
+          />
+        </FormField>
+
+        <FormField
+          label={t("Unit Cost per Unit (LKR)")}
+          error={errors.cost_price}
+          hint={t("Buying price per unit")}
+        >
+          <input
+            className={cls("cost_price")}
+            type="number"
+            min="0"
+            step="0.01"
+            value={v.cost_price}
+            onChange={(e) => set("cost_price", e.target.value)}
+            placeholder={t("e.g. 1100.00")}
+          />
+        </FormField>
+
+        <FormField
+          label={t("Selling Price per Unit (LKR)")}
+          error={errors.selling_price}
+          hint={
+            sellBelowCost
+              ? t("⚠ Lower than the unit cost — this item would sell at a loss.")
+              : sellAtCost
+                ? t("⚠ Same as the unit cost — no profit on this item.")
+                : t("The price a sale suggests for this item")
+          }
+        >
+          <input
+            className={cls("selling_price")}
+            type="number"
+            min="0"
+            step="0.01"
+            value={v.selling_price}
+            onChange={(e) => set("selling_price", e.target.value)}
+            placeholder={t("e.g. 1350.00")}
+          />
+        </FormField>
+
+        {/* Total Cost (read-only) */}
+        <FormField
+          label={t("Total Cost (LKR)")}
+          hint={`${t("Unit Cost × Quantity")}  =  ${unitCost.toFixed(2)} × ${qty}`}
+        >
+          <input
+            className="input-field bg-slate-100 font-semibold text-slate-700 cursor-not-allowed dark:bg-slate-800"
+            type="text"
+            value={totalCost.toLocaleString("en-LK", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            readOnly
+            tabIndex={-1}
+          />
+        </FormField>
+
+        <FormField
+          label={t("Item Delivery Lead Time (Days)")}
+          error={errors.lead_time_days}
+          hint={t("Expected delivery time (Used for Dynamic Safety Stock)")}
+        >
+          <input
+            className={cls("lead_time_days")}
+            type="number"
+            min="0"
+            step="1"
+            value={v.lead_time_days}
+            onChange={(e) => set("lead_time_days", e.target.value)}
+            placeholder={t("e.g. 1")}
+          />
+        </FormField>
+      </div>
+
+      <div className="flex justify-end gap-3 border-t border-slate-100 pt-5 dark:border-slate-800">
+        <Link href="/dashboard/inventory">
+          <Button variant="secondary" type="button">
+            {t("Cancel")}
+          </Button>
+        </Link>
+        <Button type="submit" disabled={saving}>
+          {saving ? t("Saving...") : isEdit ? t("Update Item") : t("Add Item")}
+        </Button>
+      </div>
+    </form>
+  );
+}

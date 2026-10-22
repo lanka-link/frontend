@@ -1,0 +1,54 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import AuthForm from "@/components/forms/AuthForm";
+import GoogleSignInButton from "@/components/forms/GoogleSignInButton";
+import useAuth from "@/hooks/useAuth";
+import { UserPlus } from "lucide-react";
+
+import { t } from "@/lib/i18n";
+export default function RegisterPage() {
+  const router = useRouter();
+  const { register, googleLogin, loading, error } = useAuth();
+
+  async function handleSubmit(values) {
+    await register(values);
+    router.push("/dashboard");
+  }
+
+  async function handleGoogle(credential) {
+    try {
+      await googleLogin(credential); // creates the account the first time
+      router.push("/dashboard");
+    } catch {
+      // shown through `error`
+    }
+  }
+
+  return (
+    <div className="flex min-h-[80vh] items-center justify-center px-4 py-8">
+      <div className="w-full max-w-md space-y-6">
+        {/* Header */}
+        <div className="text-center space-y-2">
+          <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-500/10 text-brand-600 dark:text-brand-400 border border-brand-500/20 shadow-inner">
+            <UserPlus className="h-6 w-6" />
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+            {t("Create an account")}
+          </h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            {t("Join Lanka-Link and manage your business")}
+          </p>
+        </div>
+
+        {/* Card */}
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 backdrop-blur-xl p-8 shadow-2xl">
+          <AuthForm mode="register" onSubmit={handleSubmit} loading={loading} error={error} />
+          <div className="mt-6">
+            <GoogleSignInButton onCredential={handleGoogle} text="signup_with" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
